@@ -7,8 +7,12 @@ import javax.jcr.PropertyIterator
 import net.liftweb.record.field.Countries
 import Option.{apply => ?}
 import java.util.Calendar
+import org.apache.commons.io.IOUtils
+import javax.jcr.Value
 
 object Extensions {
+  
+  import JcrRecord._
   
   implicit def extendNode(node: Node) = new NodeExtender(node)
   
@@ -22,8 +26,12 @@ object Extensions {
     def next = it.nextProperty
   }
   
+  def factory = jcrSession.getValueFactory
+  
   implicit def propertyToString(p:Property): String = p.getString
   implicit def propertyToStringOption(p:Property): Option[String] = ?(p.getString)
+  implicit def stringToValue(s:String): Value = factory.createValue(s)
+  implicit def stringOptionToValue(s:Option[String]) = factory.createValue(s.orNull)
   
   implicit def propertyToBoolean(p:Property): Boolean = p.getBoolean
   implicit def propertyToBooleanOption(p:Property): Option[Boolean] = ?(p.getBoolean)
@@ -39,7 +47,10 @@ object Extensions {
   implicit def propertyToCalOption(p:Property): Option[Calendar] = ?(p.getDate)
   
   implicit def propertyToDecimal(p:Property): BigDecimal = p.getLong
-  implicit def propertyToDecimalOption(p:Property): Option[BigDecimal] = ?(p.getLong)
+  implicit def propertyToDecimalOption(p:Property): Option[BigDecimal] = ?(p.getDecimal)
+
+  implicit def propertyToBinary(p:Property): Array[Byte] = IOUtils.toByteArray(p.getBinary.getStream)
+  implicit def propertyToBinaryOption(p:Property): Option[Array[Byte]] = ?(IOUtils.toByteArray(p.getBinary.getStream))
 
   class NodeExtender(node: Node) {
 

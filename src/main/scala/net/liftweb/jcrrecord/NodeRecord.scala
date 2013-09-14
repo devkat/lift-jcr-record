@@ -9,16 +9,21 @@ import Path._
 import net.liftweb.record.Field
 import javax.jcr.Property
 import net.liftweb.record.MetaRecord
+import net.liftweb.record.TypedField
 
 trait NodeRecord[T <: Record[T] with NodeRecord[T]] extends Record[T] with Mapper[T] {
   self: T =>
 
   import JcrRecord._
   import Extensions._
+  
+  protected def jcrPath(node:Node) = Path.parse(node.getPath)
 
-  def jcrPath: Option[Path] = jcrNode map { n => Path.parse(n.getPath) }
+  def jcrPath: Option[Path] = jcrNode map jcrPath _
 
   private[jcrrecord] var jcrNode: Option[Node] = None
+  
+  def identifier = withNode { _.getIdentifier }
   
   def createAt(path: Path): T = {
     val r = meta.createRecord
@@ -27,24 +32,24 @@ trait NodeRecord[T <: Record[T] with NodeRecord[T]] extends Record[T] with Mappe
     r
   }
 
-  protected def findNodes(path: Path): Iterator[Node] = {
-    val root = jcrSession.getRootNode
+  protected def findNodes(path: Path, parent: Node = jcrSession.getRootNode): Seq[Node] = {
     path.names match {
-      case Nil => Iterator(root)
-      case p => {
-        val relPath = p mkString "/"
-        if (root.hasNode(relPath)) root.getNodes(relPath) else Iterator.empty
+      case Nil => Nil
+      case step :: Nil => parent.getNodes(step).toSeq
+      case head :: tail => {
+        val nodes = parent.getNodes(head)
+        nodes.flatMap(n => findNodes(Path(tail, false), n)).toSeq
       }
     }
   }
+  
+  def find(path: Path): Seq[T] = {
+    findNodes(path).map(fromNode _).toSeq
+  }
 
-  def find(path: Path): Seq[T] =
-    findNodes(path) map { node =>
-      val r = meta.createRecord
-      r.load(node)
-      r
-    } toSeq
-
+  def fromNode(n:Node): T =
+    { val r = meta.createRecord; r.load(n); r }
+  
   def withNode[T](f: Node => T): T = jcrNode match {
     case Some(node) => f(node)
     case None => throw new RuntimeException("Record not bound to node.")
@@ -54,21 +59,21 @@ trait NodeRecord[T <: Record[T] with NodeRecord[T]] extends Record[T] with Mappe
     withNode { _.remove() }
   }
   
-  private def dump(node: Node) {
-    import Extensions._
-    println("Path: " + node.getPath)
-
-    for (property <- node.properties) {
-      if (property.getDefinition.isMultiple)
-        for (value <- property.getValues)
-          println(" " + property.getPath + " = " + value)
-      else
-        println(" " + property.getPath + " = " +
-          property.getString)
+  def parentOf(child:NodeRecord[_]): Option[T] = child withNode { n =>
+    val parent = n.getParent
+    parent.getPath() match {
+      case "" => None
+      case p => Some(fromNode(parent))
     }
-
-    for (child <- node.childNodes)
-      dump(child)
   }
+  
+  def getReferences[R <: NodeRecord[R]]: Iterator[(T, TypedField[_])] = withNode { node =>
+    node.getReferences map { property =>
+      val refRecord = fromNode(property.getParent)
+      val field = refRecord.fieldByName(property.getName)
+      (refRecord, field.asInstanceOf[TypedField[_]])
+    }
+  }
+  
 }
 
